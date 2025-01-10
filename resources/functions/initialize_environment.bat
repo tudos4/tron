@@ -1,171 +1,104 @@
-:: Purpose:       Initializes Tron runtime environment. Called by Tron.bat at initial launch or by an individual sub-stage script when launched manually
-::                This file determines Tron's overall project version and date
-::                Do not edit this script
-:: Requirements:  The ability to look and not touch
+:: Purpose:       Tron's settings script, called when it launches. Customize this file to change how Tron behaves. 
+::                Sub-stage scripts also call this file if they're launched directly.
+:: Requirements:  n/a
 :: Author:        vocatus on reddit.com/r/TronScript ( vocatus.gate at gmail ) // PGP key: 0x07d1490f82a211a2
-@echo off
+:: Version:       1.0.7 - Remove all code related to Sophos due to it being deprecated
+::                1.0.6 + Add SKIP_ADWCLEANER_SCAN (-sac) switch. Thanks to u/fr0stedfl4ke
+::                1.0.5 - Remove references to Adobe Flash
+::                1.0.4 + Add PRESERVE_MALWAREBYTES (-rmb) switch to have Tron automatically remove Malwarebytes at the end of the run
+::                      + Add SKIP_COOKIE_CLEANUP (-scc) switch to have Tron preserve ALL cookies. Thanks to tbr:sebastian
+::                1.0.3 + Add SKIP_ONEDRIVE_REMOVAL (-sor) switch. Thanks to github:ptrkhh
+::                1.0.2 - Remove references to Java
+::                1.0.1 + Add AUTORUN_IN_SAFE_MODE (-asm) switch and associated variable. Combine this with -a to automatically reboot to Safe Mode prior to running (legacy behavior)
+::                1.0.0 . Initial write; forked out of v9.9.0 of tron.bat
 
-:: Tron Project version and date. These two variables determine the overall project version and date
-set TRON_VERSION=12.0.7
-set TRON_DATE=2024-03-xx
-
-:: Set window title
-title Tron v%TRON_VERSION% (%TRON_DATE%)
-
-:: Initialize script-internal variables
-set ERRORS_DETECTED=no
-set WARNINGS_DETECTED=no
-set BAD_RUNPATH=no
-set CONFIG_DUMP=no
-set TARGET_METRO=no
-set FREE_SPACE_AFTER=0
-set FREE_SPACE_BEFORE=0
-set FREE_SPACE_SAVED=0
-set HELP=no
-set NETWORK_AVAILABLE=undetected
-set SAFE_MODE=no
-if /i "%SAFEBOOT_OPTION%"=="MINIMAL" set SAFE_MODE=yes & if /i "%SAFEBOOT_OPTION%"=="NETWORK" set SAFE_MODE=yesif /i "%SAFEBOOT_OPTION%"=="MINIMAL" set SAFE_MODE=yes & if /i "%SAFEBOOT_OPTION%"=="NETWORK" set SAFE_MODE=yesset SKIP_CHECK_UPDATE=no
-set SMART_PROBLEM_CODE=undetected
-set SYSTEM_LANGUAGE=undetected
-set WIN_VER=undetected
-set WIN_VER_NUM=undetected
+:: Script version
 
 
-:: Force path to some system utilities in case the system PATH is messed up
-set WMIC=%SystemRoot%\System32\wbem\wmic.exe
-set FIND=%SystemRoot%\System32\find.exe
-set FINDSTR=%SystemRoot%\System32\findstr.exe
-set REG=%SystemRoot%\System32\reg.exe
+:::::::::::::::
+:: VARIABLES ::
+:::::::::::::::
+:: Rules for variables:
+::  * NO quotes!                    (bad:  "c:\directory\path"       )
+::  * NO trailing slashes on paths! (bad:   c:\directory\            )
+::  * Spaces are okay               (okay:  c:\my folder\with spaces )
+::  * Network paths are okay        (okay:  \\server\share name      )
+
+:: LOGPATH is the parent directory for all of Tron's output (logs, backups, etc). Tweak the paths below to your liking if you want to change it
+:: If you want a separate directory generated per Tron run (for example if doing multiple runs for testing), use something like this:
+::   set LOGPATH=%SystemDrive%\logs\tron\%COMPUTERNAME%_%DTS%
+
+:: Master log file. To differentiate logfiles if you're doing multiple runs, you can do something like:
+::  set LOGFILE=tron_%COMPUTERNAME%_%DTS%.log
+
+:: Where Tron should save files that the various virus scanners put in quarantine. Currently unused (created, but nothing is stored here)
+
+:: Registry, Event Logs, and power scheme backups are all saved here
+
+:: Where to save raw unprocessed logs from the various sub-tools
+
+:: Where to save the summary logs (created from the raw logs)
 
 
-:: Get the date into ISO 8601 standard format (yyyy-mm-dd)
-for /f %%a in ('^<NUL %WMIC% OS GET LocalDateTime ^| %FIND% "."') DO set DTS=%%a
-set CUR_DATE=%DTS:~0,4%-%DTS:~4,2%-%DTS:~6,2%
+:::::::::::::::::::::
+:: SCRIPT DEFAULTS ::
+:::::::::::::::::::::
+:: ! These are Tron's defaults. All settings here are overridden if their respective command-line switch is used
+::   If you use a CLI switch and Tron encounters a reboot, the CLI switch will be honored when the script resumes
+:: AUTORUN                (-a)   = Automatic execution (no welcome screen or prompts), implies -e
+:: AUTORUN_IN_SAFE_MODE   (-asm) = Automatic execution (no welcome screen or prompts), implies -e, autoboots to Safe Mode
+:: DRY_RUN                (-d)   = Run through script but skip all actual actions (test mode)
+:: DEV_MODE               (-dev) = Override OS detection and allow running Tron on unsupported OS's
+:: EULA_ACCEPTED          (-e)   = Accept EULA (suppress disclaimer warning screen)
+:: EMAIL_REPORT           (-er)  = Email post-run report with log file. Requires you to configure SwithMailSettings.xml prior to running
+:: PRESERVE_METRO_APPS    (-m)   = Don't remove OEM Metro apps
+:: NO_PAUSE               (-np)  = Set to yes to skip pause at the end of the script
+:: AUTO_SHUTDOWN          (-o)   = Shutdown after the finishing. Overrides auto-reboot
+:: PRESERVE_POWER_SCHEME  (-p)   = Preserve active power scheme. Default is to reset power scheme to Windows defaults at the end of Tron
+:: PRESERVE_MALWAREBYTES  (-pmb) = Preserve Malwarebytes (don't uninstall it) after Tron is complete
+:: AUTO_REBOOT_DELAY      (-r)   = Post-run delay (in seconds) before rebooting. Set to 0 to disable auto-reboot
+:: SKIP_ANTIVIRUS_SCANS   (-sa)  = Skip ALL antivirus scans (ADW, KVRT, MBAM, SAV). Use per-scanner switches to individually toggle usage
+:: SKIP_ADWCLEANER_SCAN   (-sac) = Set to yes to skip AdwCleaner scan
+:: SKIP_APP_PATCHES       (-sap) = Set to yes to skip application patches (don't patch 7-Zip)
+:: SKIP_COOKIE_CLEANUP    (-scc) = Set to yes to preserve ALL cookies (not recommended, Tron auto-preserves most common login cookies)
+:: SKIP_CUSTOM_SCRIPTS    (-scs) = Set to yes to forcibly skip Stage 8: Custom Scripts regardless whether or not .bat files exist in the directory
+:: SKIP_DEFRAG            (-sd)  = Set to yes to override the SSD detection check and force Tron to always skip defrag regardless of the drive type
+:: SKIP_DEBLOAT           (-sdb) = Set to yes to skip de-bloat section (OEM bloat removal). Implies -m
+:: SKIP_DISM_CLEANUP      (-sdc) = Skip DISM Cleanup (SxS component store deflation)
+:: SKIP_DEBLOAT_UPDATE    (-sdu) = Set to yes to prevent Tron from auto-updating the stage 2 debloat lists prior to Stage 0 execution
+:: SKIP_EVENT_LOG_CLEAR   (-se)  = Set to yes to skip Event Log clear (don't backup and clear Windows Event Logs)
+:: SKIP_KASKPERSKY_SCAN   (-sk)  = Set to yes to skip Kaspersky Virus Rescue Tool scan
+:: SKIP_MBAM_INSTALL      (-sm)  = Set to yes to skip Malwarebytes Anti-Malware installation
+:: SKIP_ONEDRIVE_REMOVAL  (-sor) = Set to yes to skip OneDrive removal regardless whether it's in use or not
+:: SKIP_PAGEFILE_RESET    (-spr) = Skip page file settings reset (don't set to "Let Windows manage the page file")
+:: SKIP_TELEMETRY_REMOVAL (-str) = Set to yes to skip Telemetry Removal (just turn telemetry off instead of removing it)
+:: SKIP_WINDOWS_UPDATES   (-swu) = Set to yes to skip Windows Updates entirely (ignore both WSUS Offline and online methods)
+:: SKIP_WSUS_OFFLINE      (-swo) = Set to yes to skip user-supplied WSUS Offline updates (if they exist; online updates still attempted)
+:: UPLOAD_DEBUG_LOGS      (-udl) = Upload debug logs. Send tron.log and the system GUID dump to the Tron developer. Please use this if possible, logs are extremely helpful in Tron development
+:: VERBOSE                (-v)   = When possible, show as much output as possible from each program Tron calls (e.g. ADW, KVRT, etc). NOTE: This is often much slower
+:: SELF_DESTRUCT          (-x)   = Set to yes to have Tron automatically delete itself after running. Leaves logs intact
 
+:: LOGGING VARIABLES ::
+if not defined LOGPATH set LOGPATH=%SystemDrive%\logs\tron\%COMPUTERNAME%_%DTS%if not defined LOGPATH set LOGPATH=%SystemDrive%\logs\tron\%COMPUTERNAME%_%DTS%if not defined LOGPATH set LOGPATH=%SystemDrive%\logs\tron\%COMPUTERNAME%_%DTS%if not defined LOGPATH set LOGPATH=%SystemDrive%\logs\tron\%COMPUTERNAME%_%DTS%if not defined LOGPATH set LOGPATH=%SystemDrive%\logs\tron\%COMPUTERNAME%_%DTS%set UPLOAD_DEBUG_LOGS=no
 
-:: Get Time Zone name and value
-for /f "USEBACKQ skip=1 delims=" %%i IN (`^<NUL %WMIC% timezone get StandardName ^|findstr /b /r [a-z]`) DO set TIME_ZONE_NAME=%%i
-
-
-:: Resume-related stuff (resuming from an interrupted run)
-set RESUME_STAGE=0
-set RESUME_SWITCHES=0
-set RESUME_DETECTED=no
-
-
-:: Detect the version of Windows we're on. This determines a few things later on
-for /f "tokens=3*" %%i IN ('reg query "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion" /v ProductName ^| %FIND% "ProductName"') DO set WIN_VER=%%i %%j
-for /f "tokens=3*" %%i IN ('reg query "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion" /v CurrentVersion ^| %FIND% "CurrentVersion"') DO set WIN_VER_NUM=%%i
-
-
-:: Detect system language. This determines which string we look for in ipconfig output for determining if we have an active network connection
-:: English
-reg query "hklm\system\controlset001\control\nls\language" /v Installlanguage | %FIND% /i "0409" >nul 2>&1
-if /i %ERRORLEVEL%==0 (
-	set SYSTEM_LANGUAGE=en
-	goto detect_network_connection
-)
-
-:: English UK
-reg query "hklm\system\controlset001\control\nls\language" /v Installlanguage | %FIND% /i "0809" >nul 2>&1
-if /i %ERRORLEVEL%==0 (
-	set SYSTEM_LANGUAGE=gb
-	goto detect_network_connection
-)
-
-:: German
-reg query "hklm\system\controlset001\control\nls\language" /v Installlanguage | %FIND% /i "0407" >nul 2>&1
-if /i %ERRORLEVEL%==0 (
-	set SYSTEM_LANGUAGE=de
-	goto detect_network_connection
-)
-
-:: Italian
-reg query "hklm\system\controlset001\control\nls\language" /v Installlanguage | %FIND% /i "0410" >nul 2>&1
-if /i %ERRORLEVEL%==0 (
-	set SYSTEM_LANGUAGE=it
-	goto detect_network_connection
-)
-
-:: French
-reg query "hklm\system\controlset001\control\nls\language" /v Installlanguage | %FIND% /i "040C" >nul 2>&1
-if /i %ERRORLEVEL%==0 (
-	set SYSTEM_LANGUAGE=fr
-	goto detect_network_connection
-)
-
-:: French Canadian #1
-reg query "hklm\system\controlset001\control\nls\language" /v Installlanguage | %FIND% /i "0409" >nul 2>&1
-if /i %ERRORLEVEL%==0 (
-	set SYSTEM_LANGUAGE=fr
-	goto detect_network_connection
-)
-
-:: French Canadian #2
-reg query "hklm\system\controlset001\control\nls\language" /v Installlanguage | %FIND% /i "0C0C" >nul 2>&1
-if /i %ERRORLEVEL%==0 (
-	set SYSTEM_LANGUAGE=fr
-	goto detect_network_connection
-)
-
-:: Spanish
-reg query "hklm\system\controlset001\control\nls\language" /v Installlanguage | %FIND% /i "0C0A" >nul 2>&1
-if /i %ERRORLEVEL%==0 (
-	set SYSTEM_LANGUAGE=es
-	goto detect_network_connection
-)
-
-:: Turkish
-reg query "hklm\system\controlset001\control\nls\language" /v Installlanguage | %FIND% /i "041F" >nul 2>&1
-if /i %ERRORLEVEL%==0 (
-	set SYSTEM_LANGUAGE=tr
-	goto detect_network_connection
-)
-
-:: Brazilian Portuguese
-reg query "hklm\system\controlset001\control\nls\language" /v Installlanguage | %FIND% /i "0416" >nul 2>&1
-if /i %ERRORLEVEL%==0 (
-	set SYSTEM_LANGUAGE=pb
-	goto detect_network_connection
-)
-
-
-:: Detect network connection. We assume it's available unless we actively detect it isn't
-:detect_network_connection
-set NETWORK_AVAILABLE=yes
-:: English
-if %SYSTEM_LANGUAGE%==en %WinDir%\system32\ipconfig /all | %FIND% /i "Subnet Mask" >NUL 2>&1
-if /i not %ERRORLEVEL%==0 set NETWORK_AVAILABLE=no
-:: English UK
-if %SYSTEM_LANGUAGE%==gb %WinDir%\system32\ipconfig /all | %FIND% /i "Subnet Mask" >NUL 2>&1
-if /i not %ERRORLEVEL%==0 set NETWORK_AVAILABLE=no
-:: German
-if %SYSTEM_LANGUAGE%==de %WinDir%\system32\ipconfig /all | %FIND% /i "Subnetzmaske" >NUL 2>&1
-if /i not %ERRORLEVEL%==0 set NETWORK_AVAILABLE=no
-:: Italian
-if %SYSTEM_LANGUAGE%==it %WinDir%\system32\ipconfig /all | %FIND% /i "Subnet Mask" >NUL 2>&1
-if /i not %ERRORLEVEL%==0 set NETWORK_AVAILABLE=no
-:: French
-if %SYSTEM_LANGUAGE%==fr %WinDir%\system32\ipconfig /all | %FIND% /i "Masque de" >NUL 2>&1
-if /i not %ERRORLEVEL%==0 set NETWORK_AVAILABLE=no
-:: Spanish
-if %SYSTEM_LANGUAGE%==es %WinDir%\system32\ipconfig /all | %FIND% /i "de subred" >NUL 2>&1
-if /i not %ERRORLEVEL%==0 set NETWORK_AVAILABLE=no
-:: Turkish
-::if %SYSTEM_LANGUAGE%==fr %WinDir%\system32\ipconfig /all | %FIND% /i "xxxx" >NUL 2>&1
-::if /i not %ERRORLEVEL%==0 set NETWORK_AVAILABLE=no
-:: Brazilian Portugese
-if %SYSTEM_LANGUAGE%==pb %WinDir%\system32\ipconfig /all | %FIND% /i "de Sub-rede" >NUL 2>&1
-if /i not %ERRORLEVEL%==0 set NETWORK_AVAILABLE=no
-
-
-:: Build USERPROFILES variable which works across ALL versions of Windows for determining location of C:\Users or C:\Documents and Settings
-pushd "%USERPROFILE%\.."
-set USERPROFILES=%CD%
-popd
-
-
-:: Build log directories if they don't exist
-for %%D in ("%LOGPATH%","%QUARANTINE_PATH%","%BACKUPS%","%RAW_LOGS%","%SUMMARY_LOGS%") do (
-	if not exist %%D mkdir %%D
-)
+:: SKIP OPTIONS ::
+set SKIP_ANTIVIRUS_SCANS=noset SKIP_ADWCLEANER_SCAN=noset SKIP_APP_PATCHES=noset SKIP_COOKIE_CLEANUP=noset SKIP_CUSTOM_SCRIPTS=noset SKIP_DEFRAG=noset SKIP_DEBLOAT=noset SKIP_DISM_CLEANUP=noset SKIP_DEBLOAT_UPDATE=noset SKIP_EVENT_LOG_CLEAR=noset SKIP_KASPERSKY_SCAN=noset SKIP_MBAM_INSTALL=noset SKIP_ONEDRIVE_REMOVAL=noset SKIP_PAGEFILE_RESET=noset SKIP_TELEMETRY_REMOVAL=noset SKIP_WINDOWS_UPDATES=noset SKIP_WSUS_OFFLINE=no
+:: OTHER VARIABLES ::
+set TRON_SETTINGS_SCRIPT_VERSION=1.0.7
+set TRON_SETTINGS_SCRIPT_DATE=2024-03-09
+set LOGFILE=tron.log
+set AUTORUN=no
+set AUTORUN_IN_SAFE_MODE=no
+set DRY_RUN=no
+set DEV_MODE=no
+set EULA_ACCEPTED=no
+set EMAIL_REPORT=no
+set PRESERVE_METRO_APPS=no
+set NO_PAUSE=no
+set AUTO_SHUTDOWN=no
+set PRESERVE_POWER_SCHEME=no
+set PRESERVE_MALWAREBYTES=no
+set AUTO_REBOOT_DELAY=0
+set UNICORN_POWER_MODE=off
+set VERBOSE=no
+set SELF_DESTRUCT=no
