@@ -24,9 +24,7 @@ set FREE_SPACE_SAVED=0
 set HELP=no
 set NETWORK_AVAILABLE=undetected
 set SAFE_MODE=no
-if /i "%SAFEBOOT_OPTION%"=="MINIMAL" set SAFE_MODE=yes
-if /i "%SAFEBOOT_OPTION%"=="NETWORK" set SAFE_MODE=yes
-set SKIP_CHECK_UPDATE=no
+if /i "%SAFEBOOT_OPTION%"=="MINIMAL" set SAFE_MODE=yes & if /i "%SAFEBOOT_OPTION%"=="NETWORK" set SAFE_MODE=yesif /i "%SAFEBOOT_OPTION%"=="MINIMAL" set SAFE_MODE=yes & if /i "%SAFEBOOT_OPTION%"=="NETWORK" set SAFE_MODE=yesset SKIP_CHECK_UPDATE=no
 set SMART_PROBLEM_CODE=undetected
 set SYSTEM_LANGUAGE=undetected
 set WIN_VER=undetected
